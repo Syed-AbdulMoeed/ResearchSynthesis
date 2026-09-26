@@ -1,11 +1,10 @@
 from psycopg import connect 
 from dotenv import load_dotenv
-from tests.test_data import get_test_paper
 from pydantic import BaseModel
 import os
 
 class Paper(BaseModel):
-    id: str
+    id: int
     title: str
     summary: str
     category: str
@@ -22,6 +21,16 @@ def add_paper(paper: Paper):
             cur.execute("""
             INSERT INTO papers (id, title, summary, category, authors, pub_date, pdf_url)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, paper.id, paper.title, paper.summary, paper.category, paper.authors, paper.pub_date, paper.pdf_url)
+            """, (paper.id, paper.title, paper.summary, paper.category, paper.authors, paper.pub_date, paper.pdf_url))
         return True
+
+def get_papers_id() -> list[str]:
+    with connect(os.getenv("CONNECTION")) as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+            SELECT id FROM papers
+            """)
+
+            # convert list of tuples to list of strs
+            return [row[0] for row in cur.fetchall()]
 
