@@ -4,7 +4,7 @@ from pydantic import BaseModel
 import os
 
 class Paper(BaseModel):
-    id: int
+    id: str
     title: str
     summary: str
     category: str
@@ -24,6 +24,7 @@ def add_paper(paper: Paper):
             """, (paper.id, paper.title, paper.summary, paper.category, paper.authors, paper.pub_date, paper.pdf_url))
         return True
 
+
 def get_papers_id() -> list[str]:
     with connect(os.getenv("CONNECTION")) as conn:
         with conn.cursor() as cur:
@@ -34,3 +35,5 @@ def get_papers_id() -> list[str]:
             # convert list of tuples to list of strs
             return [row[0] for row in cur.fetchall()]
 
+
+#print(get_papers_id())

@@ -4,7 +4,7 @@ from backend.database import *
 
 def test_sql():
      paper = Paper(
-         id=60,
+         id="60",
          title="Why Keria is the GOAT support",
          summary="He is HIM",
          category="facts",
