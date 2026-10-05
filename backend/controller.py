@@ -1,6 +1,6 @@
 import requests
 import xml.etree.ElementTree as ET
-from  database import get_papers_id
+from  database import Paper, get_papers_id, get_latest_paper
 
 
 class Controller:
@@ -18,7 +18,7 @@ class Controller:
         self.URL = "http://export.arxiv.org/api/query"
 
 
-    def get_articles(self):
+    def get_papers(self):
         """Get new articles if they are different"""
 
         #|----Call arXiv API----|
@@ -28,17 +28,25 @@ class Controller:
         print("Success")
         root = ET.fromstring(response.content)
 
-        articles, ids = self.proccess_xml(root)
-        return ids
+        papers, ids = self.proccess_xml(root)
+        
+        #|----Get new Papers----|
+        new_papers = self.get_new_papers(papers)
+        if not new_papers:
+            return "No updates"
+        return new_papers
 
-    def proccess_xml(self, root) -> tuple[list[dict], list[str]]:
-        """Proccess XML from arxiv and return tuple of (articles, ids)"""
+        
+
+
+    def proccess_xml(self, root) -> tuple[list[Paper], list[str]]:
+        """Proccess XML from arxiv and return tuple of (papers, ids)"""
         # arXiv returns Atom XML format        
         namespace = {
             "atom": "http://www.w3.org/2005/Atom",
             "arxiv": "http://arxiv.org/schemas/atom"
         }
-        fetched_articles = []
+        fetched_papers = []
         fetched_ids = []
 
         #|----Proccess XML package----|
@@ -61,29 +69,39 @@ class Controller:
             # Get primary category if present
             primary_category = entry.find("arxiv:primary_category", namespace)
             category = primary_category.get("term") if primary_category is not None else None
-            print(category)
 
             # Extract ID
             arxiv_id_url = entry.find("atom:id", namespace).text
             arxiv_id = arxiv_id_url.split("/abs/")[-1]
             pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"    
 
-            fetched_articles.append(
-            {
-                "id": arxiv_id,
-                "title": title,
-                "publication_date": pub_date,
-                "abstract": abstract,
-                "pdf_url": pdf_url,
-                "category": category,
-                "author": author
-            }
+            fetched_papers.append(
+            Paper(
+                id= arxiv_id,
+                title= title,
+                pub_date= pub_date,
+                abstract= abstract,
+                pdf_url= pdf_url,
+                category= category,
+                authors= author
+            )
         )
             fetched_ids.append(arxiv_id)
-        return fetched_articles, fetched_ids
+        return fetched_papers, fetched_ids
 
-    def are_articles_updated(ids, self):
-        return None
+
+    def get_new_papers(self, papers):
+        """Returns list of new articles"""
+        latest_ids = get_latest_paper()
+        new_papers = []
+
+        for paper in papers:
+            if paper.id not in latest_ids:
+                new_papers.append(paper)
+
+        return new_papers
+                    
 
 cont = Controller()
-print(cont.get_articles())
+cont.get_papers()
+
