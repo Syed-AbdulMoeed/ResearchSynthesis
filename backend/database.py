@@ -1,4 +1,5 @@
 from psycopg import connect 
+from psycopg.rows import dict_row
 from dotenv import load_dotenv
 from pydantic import BaseModel
 import os
@@ -13,10 +14,11 @@ class Paper(BaseModel):
     pdf_url: str | None = None
 
 load_dotenv()
+CONNECTION = os.getenv("CONNECTION")
 
 def add_paper(paper: Paper):
     """Adds a paper to the `paper` database using `Paper` class"""
-    with connect(os.getenv("CONNECTION")) as conn:
+    with connect(CONNECTION) as conn:
         with conn.cursor() as cur:
             cur.execute("""
             INSERT INTO papers (id, title, abstract, category, authors, pub_date, pdf_url)
@@ -26,7 +28,7 @@ def add_paper(paper: Paper):
 
 
 def get_papers_id() -> list[str]:
-    with connect(os.getenv("CONNECTION")) as conn:
+    with connect(CONNECTION) as conn:
         with conn.cursor() as cur:
             cur.execute("""
             SELECT id FROM papers
@@ -38,7 +40,7 @@ def get_papers_id() -> list[str]:
 
 def get_latest_paper() -> set[str]:
     """Return the id of the papers with the latest date"""
-    with connect(os.getenv("CONNECTION")) as conn:
+    with connect(CONNECTION) as conn:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT id
@@ -51,6 +53,47 @@ def get_latest_paper() -> set[str]:
                 );
 """)
             return {row[0] for row in cur.fetchall()}
+
+
+# I want to insert it in batch
+
+def add_techs(names, embeds):
+    """batch processes tech"""
+    rows = list(zip(names, embeds)) 
+    with connect(CONNECTION) as conn:
+        with conn.cursor() as con:
+            con.executemany("""
+            INSERT INTO technologies (name, embedding)
+            VALUES (%s, %s)""", rows)
+
+
+def add_aliases(names_aliases: dict[str:list]):
+    """add aliases in batch"""
+
+    # transform dict with str:list
+    rows = []
+    for key, vals in names_aliases.items():
+        for val in vals: rows.append((key,val))
+    with connect(CONNECTION) as conn:
+        with conn.cursor() as con:
+            con.executemany("""
+            INSERT INTO aliases (name, alias)
+            VALUES (%s, %s)""", (rows))
+
+
+def get_known_techs() -> tuple[str, list[float]]:
+    """Get technologies and their embeddings and aliases"""
+    with connect(CONNECTION) as conn:
+        with conn.cursor(row_factory=dict_row) as con:
+            con.execute("""
+            SELECT t.name, embedding, alias 
+            FROM technologies as t
+            LEFT JOIN aliases as a ON a.name = t.name
+""")
+            raw = con.fetchall()
+            emb_matrix = []
+            for row in raw: emb_matrix.append(row["embedding"])
+            return raw, emb_matrix  
             
 
 MOCK_PAPERS = [
@@ -84,3 +127,4 @@ MOCK_PAPERS = [
 
 
 #print(get_papers_id())
+print(get_known_techs())
