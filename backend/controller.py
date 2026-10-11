@@ -18,7 +18,7 @@ class Controller:
         self.URL = "http://export.arxiv.org/api/query"
 
 
-    def get_papers(self):
+    def get_papers(self) -> list[Paper] :
         """Get new articles if they are different"""
 
         #|----Call arXiv API----|
@@ -28,18 +28,18 @@ class Controller:
         print("Success")
         root = ET.fromstring(response.content)
 
-        papers, ids = self.proccess_xml(root)
+        papers, ids = self._proccess_xml(root)
         
         #|----Get new Papers----|
-        new_papers = self.get_new_papers(papers)
+        new_papers = self._get_new_papers(papers)
         if not new_papers:
-            return "No updates"
+            return []
         return new_papers
 
         
 
 
-    def proccess_xml(self, root) -> tuple[list[Paper], list[str]]:
+    def _proccess_xml(self, root) -> tuple[list[Paper], list[str]]:
         """Proccess XML from arxiv and return tuple of (papers, ids)"""
         # arXiv returns Atom XML format        
         namespace = {
@@ -90,7 +90,7 @@ class Controller:
         return fetched_papers, fetched_ids
 
 
-    def get_new_papers(self, papers):
+    def _get_new_papers(self, papers):
         """Returns list of new articles"""
         latest_ids = get_latest_paper()
         new_papers = []
@@ -102,6 +102,4 @@ class Controller:
         return new_papers
                     
 
-cont = Controller()
-cont.get_papers()
-
+#cont = Controller()

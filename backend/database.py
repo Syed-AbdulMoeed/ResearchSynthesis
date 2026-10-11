@@ -53,5 +53,34 @@ def get_latest_paper() -> set[str]:
             return {row[0] for row in cur.fetchall()}
             
 
-print(get_latest_paper())
+MOCK_PAPERS = [
+    Paper(
+        id="1706.03762",
+        title="Attention Is All You Need",
+        abstract="The dominant sequence transduction models are based on complex recurrent or convolutional neural networks in an encoder-decoder configuration. The best performing models also connect the encoder and decoder through an attention mechanism. We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely. Experiments on two machine translation tasks show these models to be superior in quality while being more parallelizable and requiring significantly less time to train.",
+        category="cs.CL",
+        authors="Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser, Illia Polosukhin",
+        pub_date="2017-06-12"
+    ),
+
+    Paper(
+        id="1810.04805",
+        title="BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding",
+        abstract="We introduce a new language representation model called BERT, which stands for Bidirectional Encoder Representations from Transformers. Unlike recent language representation models, BERT is designed to pre-train deep bidirectional representations from unlabeled text by jointly conditioning on both left and right context in all layers. As a result, the pre-trained BERT model can be fine-tuned with just one additional output layer to create state-of-the-art models for a wide range of tasks.",
+        category="cs.CL",
+        authors="Jacob Devlin, Ming-Wei Chang, Kenton Lee, Kristina Toutanova",
+        pub_date="2018-10-11"
+    ),
+
+    Paper(
+        id="2005.14165",
+        title="Language Models are Few-Shot Learners",
+        abstract="Recent work has demonstrated substantial gains on many NLP tasks and benchmarks by pre-training on a large corpus of text followed by fine-tuning on a specific task. Here we show that scaling up language models greatly improves task-agnostic, few-shot performance, sometimes even reaching competitiveness with prior state-of-the-art fine-tuning approaches. Specifically, we train GPT-3, an autoregressive language model with 175 billion parameters, and test its performance in the few-shot setting.",
+        category="cs.CL",
+        authors="Tom B. Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Prafulla Dhariwal, Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, Sandhini Agarwal, Ariel Herbert-Voss, Gretchen Krueger, Tom Henighan, Rewon Child, Aditya Ramesh, Daniel Ziegler, Jeffrey Wu, Clemens Winter, Christopher Hesse, Mark Chen, Eric Sigler, Scott Gray, Benjamin Chess, Jack Clark, Christopher Berner, Sam McCandlish, Alec Radford, Ilya Sutskever, Dario Amodei",
+        pub_date="2020-05-28"
+    )
+]
+
+
 #print(get_papers_id())
