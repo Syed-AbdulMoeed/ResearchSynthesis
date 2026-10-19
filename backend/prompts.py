@@ -45,3 +45,42 @@ def get_summary_prompt(papers):
     )
 
     return f"{SUMMARY_PROMPT}{papers_xml}\n</papers>\n</input>"
+
+REVIEW_PROMPT = """
+<task>
+You will receive a list of reviews extracted from scientific papers related to AI and Computer Science.
+
+Each review contains:
+
+A keyword extracted from a paper.
+Two candidate technology names.
+A summary of the paper.
+The paper_id.
+Determine whether the keyword refers to the same underlying technology as either candidate, using your knowledge and the paper summary as context.
+
+Rules:
+
+Return 1 or 2 to chose option 1 or 2.
+If neither candidate matches, return null.
+Do not select a candidate merely because it is related to the keyword.
+Treat distinct technologies, implementations, architectures, and frameworks as different unless they genuinely refer to the same technology.
+Preserve the original keyword and paper_id exactly.
+
+<reviews>
+"""
+
+def get_review_prompt(reviews):
+    review_part = "\n".join(
+        f"""<review>
+    <review_id>{review[0]}</review_id>
+    <keyword>{review[1]["keyword"]}</keyword>
+    <may_match_1> 1: {review[1]["may_match"][0]}</may_match_1>
+    <may_match_2> 2: {review[1]["may_match"][1]}</may_match_2>
+    <summary>{review[1]["summary"]}</summary>
+    <paper_id>{review[1]["paper_id"]}</paper_id>
+</review>"""
+        for review in reviews
+    )
+    return f"{REVIEW_PROMPT}\n{review_part}\n</reviews>"
+    
+
