@@ -2,11 +2,12 @@ from langgraph.graph import StateGraph, MessagesState, START, END
 from typing import TypedDict
 from controller import Controller
 from database import Paper
+from agent import Agent
 
 class State(TypedDict):
     new_papers: list[Paper]
     found_new: bool = False
-    status: str = "Not found"
+    
 
 
 def search_for_papers(state: State):
@@ -14,6 +15,8 @@ def search_for_papers(state: State):
 
 
 def process_papers(state: State):
+    agent = Agent(state["new_papers"])
+    agent.work()
     return {"status": "found"}
 
 
@@ -21,6 +24,9 @@ def route_on_papers(state: State):
     if state["new_papers"]:
         return "process"
     return "end"
+
+
+
 
 
 graph = StateGraph(State)
@@ -44,4 +50,4 @@ graph.add_edge("process", END)
 app = graph.compile()
 
 res = app.invoke({"new_papers": [], "found_new": False})
-print(res)
+#print(res)

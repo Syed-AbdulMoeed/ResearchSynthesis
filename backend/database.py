@@ -2,6 +2,7 @@ from psycopg import connect
 from psycopg.rows import dict_row
 from dotenv import load_dotenv
 from pydantic import BaseModel
+from typing import Literal
 import os
 
 class Paper(BaseModel):
@@ -12,6 +13,28 @@ class Paper(BaseModel):
     authors: str
     pub_date: str
     pdf_url: str | None = None
+
+
+class PaperSummary(BaseModel):
+    paper_id: str
+    technologies: list[str]
+    category: str
+    summary: str
+    research_context: list[Literal[
+        "theoretical",
+        "methodological",
+        "applied_industry",
+        "medical_healthcare",
+        "scientific_research",
+        "social_humanities",
+        "infrastructure_systems",
+        "other",
+        "unclear"
+    ]]
+
+
+class PaperSummaries(BaseModel):
+    summaries: list[PaperSummary]
 
 load_dotenv()
 CONNECTION = os.getenv("CONNECTION")
@@ -81,19 +104,28 @@ def add_aliases(names_aliases: dict[str:list]):
             VALUES (%s, %s)""", (rows))
 
 
-def get_known_techs() -> tuple[str, list[float]]:
-    """Get technologies and their embeddings and aliases"""
+def get_known_techs() -> tuple[list[dict], list[list[float]]]:
+    """Get technologies, embeddings, and lists of aliases."""
     with connect(CONNECTION) as conn:
-        with conn.cursor(row_factory=dict_row) as con:
-            con.execute("""
-            SELECT t.name, embedding, alias 
-            FROM technologies as t
-            LEFT JOIN aliases as a ON a.name = t.name
-""")
-            raw = con.fetchall()
-            emb_matrix = []
-            for row in raw: emb_matrix.append(row["embedding"])
-            return raw, emb_matrix  
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute("""
+                SELECT
+                    t.name,
+                    t.embedding,
+                    COALESCE(
+                        ARRAY_AGG(a.name) FILTER (WHERE a.name IS NOT NULL),
+                        ARRAY[]::TEXT[]
+                    ) AS aliases
+                FROM technologies AS t
+                LEFT JOIN aliases AS a
+                    ON a.name = t.name
+                GROUP BY t.name, t.embedding
+            """)
+
+            raw = cur.fetchall()
+            emb_matrix = [row["embedding"] for row in raw]
+
+            return raw, emb_matrix
             
 
 MOCK_PAPERS = [
@@ -125,6 +157,9 @@ MOCK_PAPERS = [
     )
 ]
 
-
+def test():
+    techs, b = get_known_techs()
+    for tech in techs:
+        print(tech['aliases'], tech['name'])
 #print(get_papers_id())
-print(get_known_techs())
+#print(get_known_techs())
