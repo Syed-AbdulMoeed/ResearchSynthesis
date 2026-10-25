@@ -11,7 +11,7 @@ class State(TypedDict):
 
 
 def search_for_papers(state: State):
-    return { "new_papers": Controller().get_papers()}
+    return { "new_papers": Controller(limit=30).get_papers()}
 
 
 def process_papers(state: State):
