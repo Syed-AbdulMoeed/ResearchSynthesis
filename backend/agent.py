@@ -29,19 +29,27 @@ class Agent:
         llm = init_chat_model(model=self.model)
         structured_llm = llm.with_structured_output(PaperSummaries)
         proc_papers = structured_llm.invoke(prompt)
-        sim_mappings, new_keywords, to_review = normalize(proc_papers.summaries)
+        sim_mappings, new_keywords, to_review, pending, incorrect_matching = normalize(proc_papers.summaries)
         
         print("sim_mappings")
+        print("total:", len(sim_mappings))
         print(sim_mappings)
 
         print("new")
+        print("total:", len(new_keywords))
         print( [(n['name'], n['aliases']) for n in new_keywords])
 
-        print("Review")
-        print(to_review)
+        #print("Review")
+        #print("total:", len(to_review))
+        #print(to_review)
         
+        print("pending")
+        print("total:", len(pending))
+        #print(pending)
 
-        
+        print("incorr_matching")
+        print("total:", len(incorrect_matching))
+        #print(to_review)
 
 
         
