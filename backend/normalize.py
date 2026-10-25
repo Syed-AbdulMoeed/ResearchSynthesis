@@ -30,7 +30,9 @@ def normalize(papers):
         """True if `short` is an acronym/abbreviation of the phrase `long`.
         "rag" <- "retrieval-augmented generation", "adam" <- "adaptive moment estimation"
         Each chunk of `short` must be the START of the next word of `long`."""
+        
         STOP = {"from", "of", "for", "and", "the", "in", "on", "with", "to"}
+        
         short = short.lower()
         if not short.isalpha() or len(short) < 2:   # single token, letters only
             return False
@@ -54,8 +56,24 @@ def normalize(papers):
                 return match(s, w[1:], used)
             return False
 
-        return match(short, words, 0)
+
+        # trailing "s" has no word of its own to start. If the check fails, retry without it.
+        if match(short, words, 0):
+            return True
+        return short.endswith("s") and len(short) > 2 and match(short[:-1], words, 0)
  
+    def split_parenthetical(tech):
+                """ "linear programming (lp)" -> ["linear programming", "lp"].
+                Only splits when one side is an acronym of the other, so "stable diffusion (v1.5)"
+                stays whole and its version number isn't thrown away."""
+                m = re.fullmatch(r"(.+?)\s*\((.+?)\)", tech)
+                if m:
+                    outside, inside = m.group(1).strip(), m.group(2).strip()
+                    if is_acronym(inside, outside) or is_acronym(outside, inside):
+                        return [outside, inside]
+                return [tech]
+
+
     def get_ngrams(text, n=3):
         text = text.lower().replace("-", " ").replace(" ", "")
         return {text[i:i+n] for i in range(len(text) - n + 1)}
@@ -89,12 +107,10 @@ def normalize(papers):
         if len(known_keywords) == 0:
             return "new", None
  
-        # [14] For every known tech: does it contain the same numbers as the candidate?
+        # For every known tech: does it contain the same numbers as the candidate?
         candidate_numbers = get_numbers(candidate)
         numbers_match = [get_numbers(known["name"]) == candidate_numbers for known in known_keywords]
  
-        # [8] CHANGED: starts as (0.0, None) instead of None, and stores the INDEX
-        # of the best match instead of the keyword itself (see explanation 8).
         max_ngram = (0.0, None)
  
         for i, known in enumerate(known_keywords):
@@ -136,16 +152,15 @@ def normalize(papers):
         # Avoid crashing if max_vals is only 1 elem
         second_best = max_vals[1] if len(max_vals) > 1 else 0.0
  
-        if max_vals[0] >= 0.85 and max_vals[0] - second_best > 0.05: # Subject to change
-            return "new_alias", known_keywords[max_indices[0]]['name']
-        elif max_vals[0] >= 0.6:
+        if max_vals[0] >= 0.6:
             # If second max is not smth the algo rooted out with -1
             if second_best >= 0.6:
                 return "review", (known_keywords[max_indices[0]]['name'], known_keywords[max_indices[1]]['name'])
-            return "review", (known_keywords[max_indices[0]]['name'])
+            return "review", (known_keywords[max_indices[0]]['name'],)
         else:
             return "new", None
  
+    print("Starting Normalizing")
  
     # Get known info
     known_techs, matrix = get_known_techs()
@@ -165,7 +180,9 @@ def normalize(papers):
     # Normalize formatting
     keywords = []
     for paper in papers:
-        keywords.extend((tech.strip().lower(), paper.paper_id, paper.summary) for tech in paper.technologies)
+        keywords.extend((part, paper.paper_id, paper.summary)
+                for tech in paper.technologies
+                for part in split_parenthetical(tech.strip().lower()))
  
     # Get Embeddings 
     embeddings = model.encode([k for k, _, _ in keywords], normalize_embeddings=True)
@@ -198,8 +215,7 @@ def normalize(papers):
         
         # New keyword indetified
         elif result == "new":
-            # add paper_id here
-            new_tech = {"name": keyword, "embedding": embedding, "aliases": []}
+            new_tech = {"name": keyword, "embedding": embedding, "aliases": [], "paper_id": p_id }
             known_techs.append(new_tech)
             matrix = np.vstack([matrix, embedding])
             new_keywords.append(new_tech)
@@ -208,14 +224,40 @@ def normalize(papers):
         # Ambigiuous result to be reviewed by LLM
         else:
             to_review.append({"candidate":keyword, "p_summary": p_summary, 
-                              "may_match": tech_name, "paper_id": p_id})
- 
-    return sim_mappings, new_keywords, to_review
+                              "may_match": tech_name, "paper_id": p_id, "embed": embedding})
+
+    if to_review:
+        print("Starting Review........")
+        answers, pending, incorrect_matching, groups = review(to_review)
+        new_names = {tech["name"] for tech in new_keywords}
+        print(to_review)
+
+        for k, group_answer in answers.items():
+            print(group_answer)
+            for paper in groups[k]:
+                if group_answer.final_tech:
+                    #print(group_answer.final_tech, paper["may_match"])
+                    aliases = sim_mappings.get((group_answer.final_tech, paper["paper_id"]), [])
+                    aliases.append(paper["candidate"])
+                    sim_mappings[(group_answer.final_tech, paper["paper_id"])] = aliases
+            # New technology
+                else:
+                    if paper["candidate"] not in new_names:
+                        new_names.add(paper["candidate"])
+                        new_keywords.append({"name": paper["candidate"], "embedding": paper["embed"], "aliases": [], "paper_id": paper["paper_id"] })
+                    else:
+                        aliases = sim_mappings.get((paper["candidate"], paper["paper_id"]), [])
+                        aliases.append(paper["candidate"])
+                        sim_mappings[(paper["candidate"], paper["paper_id"])] = aliases
+        
+        # TO-DO: do smth with pending and incorrect_matching later
+    
+        return sim_mappings, new_keywords, to_review, pending, incorrect_matching
+
+    return sim_mappings, new_keywords, to_review, None, None
                 
 class Reviewed(BaseModel):
-    keyword: str
-    choice: int | None = None
-    paper_id: str
+    choice: int | None 
     id: int
     final_tech: str | None = None 
 
@@ -229,28 +271,38 @@ def review( reviews: list[dict]):
 
     def collapse_reviews(reviews: list[dict]):
         """Returns list of only unique candidate and may_match pairs"""
-        unique = set()
-        u_id = []
-        for i,review in enumerate(reviews):
-            sign = review["candidate"] ,  frozenset(review["may_match"])
-            if sign not in unique:
-                unique.add(sign)
-                u_id.append(i)
-        return [reviews[inx] for inx in u_id]
+        unique_reviews = []
+        groups = []
+        first_index = {}
+        for review in reviews:
+            sign = review["candidate"], frozenset(review["may_match"])
+            if sign not in first_index:
+                first_index[sign] = len(first_index)
+                unique_reviews.append(review)
+                groups.append([])
+            groups[first_index[sign]].append(review)
+        return unique_reviews, groups 
 
+    
+    
     llm = init_chat_model("google_genai:gemini-3.5-flash-lite")
     llm = llm.with_structured_output(ListReviewed)
+    llm = llm.with_retry(
+        stop_after_attempt=3,
+        wait_exponential_jitter=True,
+    )
 
-    pending = list(range(len(reviews)))
     answers = {}
     incorrect_matching = []
-    reviews = collapse_reviews(reviews)
+    reviews, groups = collapse_reviews(reviews)
+    pending = list(range(len(reviews)))
 
     # 3 retries
     for _ in range(3):
         if not pending:
             break
 
+        print("Sending LLM call")
         results = llm.invoke(get_review_prompt([(i, reviews[i]) for i in pending]))
         
         for result in results.reviews:
@@ -259,19 +311,22 @@ def review( reviews: list[dict]):
                 continue
 
             # Incorrect matching
-            if result.choice is not None and result.choice not in [1, 2]:
+            if result.choice is not None and result.choice not in range(1, len(reviews[result.id]["may_match"]) + 1):
                 pending.remove(result.id) # dont retry
+                incorrect_matching.append((result, reviews[result.id]))
                 continue
 
             # Get Chosen tech from the chosen option by the LLM 
             if result.choice is not None:
                 result.final_tech = reviews[result.id]["may_match"][result.choice - 1]
+            else:
+                result.final_tech = None
 
             # Add correct answer
             answers[result.id] = result
             pending.remove(result.id)
     
-    return answers, pending, incorrect_matching  
+    return answers, pending, incorrect_matching, groups  
 
 
 
