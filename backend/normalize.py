@@ -3,19 +3,7 @@ from pydantic import BaseModel
 from langchain.chat_models import init_chat_model
 from sentence_transformers import SentenceTransformer
 import numpy as np
-from database import get_known_techs, add_techs, add_aliases, PaperSummary
-
-'''
-
-model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-
-terms = ["LLM", "large language model", "CNN", "RAG", "Retrieval Augemented Generation"]
-
-embeddings = model.encode(terms)
-similarities = model.similarity(embeddings, embeddings)
-
-print(similarities)'''
-
+from database import get_known_techs, save_normalizer_output, PaperSummary  
 
 import re          # needed for get_numbers() below
 import numpy as np
@@ -230,10 +218,10 @@ def normalize(papers):
         print("Starting Review........")
         answers, pending, incorrect_matching, groups = review(to_review)
         new_names = {tech["name"] for tech in new_keywords}
-        print(to_review)
+        
 
         for k, group_answer in answers.items():
-            print(group_answer)
+            
             for paper in groups[k]:
                 if group_answer.final_tech:
                     #print(group_answer.final_tech, paper["may_match"])
@@ -250,11 +238,37 @@ def normalize(papers):
                         aliases.append(paper["candidate"])
                         sim_mappings[(paper["candidate"], paper["paper_id"])] = aliases
         
-        # TO-DO: do smth with pending and incorrect_matching later
-    
-        return sim_mappings, new_keywords, to_review, pending, incorrect_matching
+        # Log every LLM answer, so thresholds can be tuned later (table: review_decisions).
+        # groups[k] holds every original review that was collapsed into question k,
+        # so one decision lists every paper it applied to.
+        decisions = [{"candidate": groups[k][0]["candidate"],
+                      "options": list(groups[k][0]["may_match"]),
+                      "final_tech": answer.final_tech,       # None = "different technology"
+                      "paper_ids": [r["paper_id"] for r in groups[k]]}
+                     for k, answer in answers.items()]
 
-    return sim_mappings, new_keywords, to_review, None, None
+        # Keywords the LLM could not settle get parked (table: unresolved_keywords).
+        # Both lists hold ids of the COLLAPSED questions, so we go back through `groups`
+        # to get one entry per original paper mention.
+        unresolved = [(r, "no_answer") for k in pending for r in groups[k]]
+        unresolved += [(r, "invalid_choice") for result, _ in incorrect_matching for r in groups[result.id]]
+
+        return sim_mappings, new_keywords, to_review, unresolved, decisions
+
+    # Nothing was reviewed: empty lists (not None) so save_normalizer_output can loop over them
+    return sim_mappings, new_keywords, to_review, [], []
+
+
+def normalize_and_save(papers):
+    """The connection: run normalize(), then write its output to Postgres in one transaction.
+    The papers must already exist in the `papers` table (aliases/technologies have foreign keys to it).
+    Call this ONCE per run: review_decisions has no uniqueness rule, so a second call would duplicate its rows."""
+    sim_mappings, new_keywords, to_review, unresolved, decisions = normalize(papers)
+    save_normalizer_output(sim_mappings, new_keywords, unresolved, decisions)
+    print(f"Saved: {len(new_keywords)} new technologies, "
+          f"{sum(len(v) for v in sim_mappings.values())} alias rows, "
+          f"{len(decisions)} decisions, {len(unresolved)} unresolved")
+    return sim_mappings, new_keywords, to_review, unresolved, decisions
                 
 class Reviewed(BaseModel):
     choice: int | None 
@@ -297,35 +311,50 @@ def review( reviews: list[dict]):
     reviews, groups = collapse_reviews(reviews)
     pending = list(range(len(reviews)))
 
+    # Num of reviews in each batch
+    BATCH_SIZE = 40
+
     # 3 retries
     for _ in range(3):
         if not pending:
             break
 
-        print("Sending LLM call")
-        results = llm.invoke(get_review_prompt([(i, reviews[i]) for i in pending]))
-        
-        for result in results.reviews:
-            # Model makes up an id
-            if result.id not in pending:
+        # Create batches
+        snapshot = list(pending)
+        batches = [snapshot[b:b + BATCH_SIZE] for b in range(0, len(snapshot), BATCH_SIZE)]
+
+        for batch in batches:
+            print(f"Sending LLM call ({len(batch)} reviews)")
+                # Process each batch
+            try:
+                # Call LLM
+                results = llm.invoke(get_review_prompt([(i, reviews[i]) for i in batch]))
+            except Exception as e:
+                print(f"Batch failed, will retry: {type(e).__name__}: {e}")
                 continue
 
-            # Incorrect matching
-            if result.choice is not None and result.choice not in range(1, len(reviews[result.id]["may_match"]) + 1):
-                pending.remove(result.id) # dont retry
-                incorrect_matching.append((result, reviews[result.id]))
-                continue
+            for result in results.reviews:
+                # Catch LLM error: result id must be in the batch and in pending 
+                if result.id not in batch or result.id not in pending:
+                    continue
 
-            # Get Chosen tech from the chosen option by the LLM 
-            if result.choice is not None:
-                result.final_tech = reviews[result.id]["may_match"][result.choice - 1]
-            else:
-                result.final_tech = None
+                # Incorrect matching
+                if result.choice is not None and result.choice not in range(1, len(reviews[result.id]["may_match"]) + 1):
+                    pending.remove(result.id) # dont retry
+                    incorrect_matching.append((result, reviews[result.id]))
+                    continue
 
-            # Add correct answer
-            answers[result.id] = result
-            pending.remove(result.id)
+                # Get Chosen tech from the chosen option by the LLM 
+                if result.choice is not None:
+                    result.final_tech = reviews[result.id]["may_match"][result.choice - 1]
+                else:
+                    result.final_tech = None
+
+                # Add correct answer
+                answers[result.id] = result
+                pending.remove(result.id)
     
+
     return answers, pending, incorrect_matching, groups  
 
 
@@ -421,7 +450,7 @@ papers_test = [
 
 
 def test():
-    sim_mappings, new_keywords, to_review =  normalize(papers_test)
+    sim_mappings, new_keywords, to_review, unresolved, decisions = normalize(papers_test)  # [L] now 5 values
     print("sim_mappings")
     print(sim_mappings)
 
