@@ -39,14 +39,20 @@ class PaperSummaries(BaseModel):
 load_dotenv()
 CONNECTION = os.getenv("CONNECTION")
 
-def add_paper(paper: Paper):
+def add_papers(papers: list[Paper]):
     """Adds a paper to the `paper` database using `Paper` class"""
+    
+    # Transform the list
+    papers = [(paper.id, paper.title, paper.abstract, paper.category, paper.authors, paper.pub_date, paper.pdf_url)
+              for paper in papers]
+    
     with connect(CONNECTION) as conn:
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.executemany("""
             INSERT INTO papers (id, title, abstract, category, authors, pub_date, pdf_url)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (paper.id, paper.title, paper.abstract, paper.category, paper.authors, paper.pub_date, paper.pdf_url))
+            """, papers) 
+            #(paper.id, paper.title, paper.abstract, paper.category, paper.authors, paper.pub_date, paper.pdf_url))
         return True
 
 
