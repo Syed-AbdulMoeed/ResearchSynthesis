@@ -83,5 +83,71 @@ def get_review_prompt(reviews):
         
     
     return f"{REVIEW_PROMPT}\n{review_part}\n</reviews>"
+
+
+import json
+from typing import Literal
+from pydantic import BaseModel
+
+# Same family as the review step. Check the current free-tier limits: this is ONE call per week,
+# so a bigger model is affordable. Change it here if the name is wrong or you want Flash instead.
+TREND_MODEL = "google_genai:gemini-3.5-flash-lite"
+
+
+TREND_PROMPT = """
+You are the analyst for a weekly research-trend tracker. You are given ONE week of data about
+scientific papers (arXiv). A "trend" here means a named technology or method that is mentioned
+in several papers. Counts were computed by code and are exact: do not recompute or doubt them.
+Your job is to interpret them and write the weekly report.
+
+HOW TO READ THE DATA (JSON):
+- week_start / week_end: the week covered. Weeks are by the paper's publication date.
+- meta.papers_this_week: how many papers the week has (the denominator for every share).
+- meta.categories: papers per arXiv category this week.
+- meta.weeks_of_data: how many weeks of data the system has in total, this week included.
+- meta.unresolved_keywords: mentions the system could not match to a technology. Counts may be
+  slightly too low by about this many.
+- counts: totals for the whole week, including items cut from the lists below.
+- repeated: technologies mentioned in 2 or more papers this week, biggest first. Fields:
+  - papers_this_week, share_of_week_papers: this week's size.
+  - prev_weeks: papers per week for the previous weeks, OLDEST FIRST (last entry = last week).
+  - total_papers_to_date: all papers mentioning it so far, this week included.
+  - weeks_since_first_seen: 0 means it first appeared this week.
+  - is_new_this_week: true if the technology was first seen this week.
+  - aliases_this_week: the spellings used and how many papers used each.
+  - categories_this_week, first_mention, example_titles: context and evidence.
+- new_single_mention: names of technologies first seen this week in only ONE paper. A single
+  mention is not a trend. It only shows what appeared.
+
+RULES:
+1. Use only the data given. Do not use outside knowledge to claim a technology is "popular" or
+   "rising". Outside knowledge may only be used to explain what a technology is, briefly.
+2. Always quote the numbers you rely on (for example "7 papers this week, 2 last week").
+3. If meta.weeks_of_data is below 3, or a technology's prev_weeks are mostly zeros because the
+   system has not been running long, you cannot call it "rising". Say it is new or too early to
+   tell, and lower the confidence.
+4. "rising" needs a clear jump over its own prev_weeks, not just a big count. A technology that is
+   big every week is "established".
+5. "emerging" is for technologies first seen recently that already appear in several papers.
+6. If nothing qualifies, set no_clear_trends to true and leave trends empty. That is a good
+   answer. Do not invent trends to fill the report.
+7. Mention anything that weakens the numbers in data_caveats (few weeks of data, a partial
+   week, unresolved keywords, a very small week, lists cut by a cap).
+8. Keep it short. At most 8 trends. One sentence of evidence each.
+
+OUTPUT: fill the requested structure. "summary" is a 3 to 5 sentence plain-language digest of the
+week: what the week looked like (size, main categories), the main trends if any, and the biggest
+caveat.
+
+Here is the info you have:
+"""
+
+def get_trend_prompt(weekly_report):
+    """`weekly_report` is trends.report_to_json(...) (a string) or the dict from get_week_report()."""
+    if not isinstance(weekly_report, str):
+        weekly_report = json.dumps(weekly_report, separators=(",", ":"), ensure_ascii=False)
+    return TREND_PROMPT + weekly_report
+
+
     
 
